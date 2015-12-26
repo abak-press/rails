@@ -31,7 +31,7 @@ module Sprockets
           else
             super(source.to_s, { :src => path_to_asset(source, :ext => 'js', :body => body, :digest => digest) }.merge!(options))
           end
-        end.join("\n").html_safe
+        end.flatten.uniq.join("\n").html_safe
       end
 
       def stylesheet_link_tag(*sources)
@@ -48,7 +48,7 @@ module Sprockets
           else
             super(source.to_s, { :href => path_to_asset(source, :ext => 'css', :body => body, :protocol => :request, :digest => digest) }.merge!(options))
           end
-        end.join("\n").html_safe
+        end.flatten.uniq.join("\n").html_safe
       end
 
       def asset_path(source, options = {})
@@ -63,6 +63,11 @@ module Sprockets
       end
       alias_method :path_to_image, :image_path # aliased to avoid conflicts with an image_path named route
 
+      def font_path(source)
+        path_to_asset(source)
+      end
+      alias_method :path_to_font, :font_path # aliased to avoid conflicts with an font_path named route
+
       def javascript_path(source)
         path_to_asset(source, :ext => 'js')
       end
@@ -75,14 +80,9 @@ module Sprockets
 
     private
       def debug_assets?
-        begin
-          compile_assets? &&
-            (Rails.application.config.assets.debug ||
-             params[:debug_assets] == '1' ||
-             params[:debug_assets] == 'true')
-        rescue NoMethodError
-          false
-        end
+        compile_assets? && (Rails.application.config.assets.debug || params[:debug_assets])
+      rescue NameError
+        false
       end
 
       # Override to specify an alternative prefix for asset path generation.
@@ -119,11 +119,6 @@ module Sprockets
 
         class AssetNotPrecompiledError < StandardError; end
 
-        # Return the filesystem path for the source
-        def compute_source_path(source, ext)
-          asset_for(source, ext)
-        end
-
         def asset_for(source, ext)
           source = source.to_s
           return nil if is_uri?(source)
@@ -152,7 +147,9 @@ module Sprockets
           if source[0] == ?/
             source
           else
-            source = digest_for(source) unless options[:digest] == false
+            if digest_assets && options[:digest] != false
+              source = digest_for(source)
+            end
             source = File.join(dir, source)
             source = "/#{source}" unless source =~ /^\//
             source
@@ -160,11 +157,24 @@ module Sprockets
         end
 
         def rewrite_extension(source, dir, ext)
-          if ext && File.extname(source).empty?
-            "#{source}.#{ext}"
-          else
+          source_ext = File.extname(source)[1..-1]
+
+          if !ext || ext == source_ext
             source
+          elsif source_ext.blank?
+            "#{source}.#{ext}"
+          elsif File.exists?(source) || exact_match_present?(source)
+            source
+          else
+            "#{source}.#{ext}"
           end
+        end
+
+        def exact_match_present?(source)
+          pathname = asset_environment.resolve(source)
+          pathname.to_s =~ /#{Regexp.escape(source)}\Z/
+        rescue Sprockets::FileNotFound
+          false
         end
       end
     end
